@@ -1,12 +1,13 @@
 // namespaces
 var dwv = dwv || {};
 dwv.tool = dwv.tool || {};
-//external
-var Kinetic = Kinetic || {};
+// external
+var Konva = Konva || {};
 
 /**
  * Arrow factory.
  * @constructor
+ * @external Konva
  */
 dwv.tool.ArrowFactory = function ()
 {
@@ -33,7 +34,7 @@ dwv.tool.ArrowFactory.prototype.create = function (points, style/*, image*/)
     // physical shape
     var line = new dwv.math.Line(points[0], points[1]);
     // draw shape
-    var kshape = new Kinetic.Line({
+    var kshape = new Konva.Line({
         points: [line.getBegin().getX(), line.getBegin().getY(),
                  line.getEnd().getX(), line.getEnd().getY() ],
         stroke: style.getLineColour(),
@@ -46,7 +47,7 @@ dwv.tool.ArrowFactory.prototype.create = function (points, style/*, image*/)
     var angle = dwv.math.getAngle(line, verticalLine);
     var angleRad = angle * Math.PI / 180;
     var radius = 5;
-    var kpoly = new Kinetic.RegularPolygon({
+    var kpoly = new Konva.RegularPolygon({
         x: line.getBegin().getX() + radius * Math.sin(angleRad),
         y: line.getBegin().getY() + radius * Math.cos(angleRad),
         sides: 3,
@@ -57,7 +58,7 @@ dwv.tool.ArrowFactory.prototype.create = function (points, style/*, image*/)
         name: "shape-triangle"
     });
     // quantification
-    var ktext = new Kinetic.Text({
+    var ktext = new Konva.Text({
         fontSize: style.getScaledFontSize(),
         fontFamily: style.getFontFamily(),
         fill: style.getLineColour(),
@@ -70,16 +71,16 @@ dwv.tool.ArrowFactory.prototype.create = function (points, style/*, image*/)
     // label
     var dX = line.getBegin().getX() > line.getEnd().getX() ? 0 : -1;
     var dY = line.getBegin().getY() > line.getEnd().getY() ? -1 : 0.5;
-    var klabel = new Kinetic.Label({
+    var klabel = new Konva.Label({
         x: line.getEnd().getX() + dX * 25,
         y: line.getEnd().getY() + dY * 15,
         name: "label"
     });
     klabel.add(ktext);
-    klabel.add(new Kinetic.Tag());
+    klabel.add(new Konva.Tag());
 
     // return group
-    var group = new Kinetic.Group();
+    var group = new Konva.Group();
     group.name("line-group");
     group.add(kshape);
     group.add(kpoly);

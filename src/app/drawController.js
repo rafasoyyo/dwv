@@ -1,12 +1,13 @@
 // namespaces
 var dwv = dwv || {};
 // external
-var Kinetic = Kinetic || {};
+var Konva = Konva || {};
 
 /**
  * Draw controller.
  * @constructor
  * @param {Object} drawDiv The HTML div used to store the drawings.
+ * @external Konva
  */
 dwv.DrawController = function (drawDiv)
 {
@@ -28,7 +29,7 @@ dwv.DrawController = function (drawDiv)
      */
     this.create = function (width, height) {
         // create stage
-        drawStage = new Kinetic.Stage({
+        drawStage = new Konva.Stage({
             'container': drawDiv,
             'width': width,
             'height': height,
@@ -153,7 +154,7 @@ dwv.DrawController = function (drawDiv)
         // fill it
         for (var i = 0; i < nLayers; ++i) {
             // create draw layer
-            var drawLayer = new Kinetic.Layer({
+            var drawLayer = new Konva.Layer({
                 'listening': false,
                 'hitGraphEnabled': false,
                 'visible': false
@@ -253,7 +254,7 @@ dwv.DrawController = function (drawDiv)
                     if ( texts.length !== 1 ) {
                         console.warn("There should not be more than one text per shape.");
                     }
-                    // get details (non Kinetic vars)
+                    // get details (non konva vars)
                     details.push({
                         "id": groups[i].id(),
                         "textExpr": encodeURIComponent(texts[0].textExpr),
@@ -281,7 +282,7 @@ dwv.DrawController = function (drawDiv)
             for ( var f = 0, lenf = drawLayers[k].length; f < lenf; ++f ) {
                 for ( var i = 0, leni = drawings[k][f].length; i < leni; ++i ) {
                     // create the group
-                    var group = Kinetic.Node.create(drawings[k][f][i]);
+                    var group = Konva.Node.create(drawings[k][f][i]);
                     var shape = group.getChildren( isNodeNameShape )[0];
                     // create the draw command
                     var cmd = new dwv.tool.DrawGroupCommand(
@@ -421,7 +422,7 @@ dwv.DrawController = function (drawDiv)
 
     /**
      * Is an input node's name 'shape'.
-     * @param {Object} node A Kineticjs node.
+     * @param {Object} node A Konva node.
      */
     function isNodeNameShape( node ) {
         return node.name() === "shape";
@@ -429,7 +430,7 @@ dwv.DrawController = function (drawDiv)
 
     /**
      * Is a node an extra shape associated with a main one.
-     * @param {Object} node A Kineticjs node.
+     * @param {Object} node A Konva node.
      */
     function isNodeNameShapeExtra( node ) {
         return node.name().startsWith("shape-");
@@ -437,7 +438,7 @@ dwv.DrawController = function (drawDiv)
 
     /**
      * Is an input node's name 'label'.
-     * @param {Object} node A Kineticjs node.
+     * @param {Object} node A Konva node.
      */
     function isNodeNameLabel( node ) {
         return node.name() === "label";

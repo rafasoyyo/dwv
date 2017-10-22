@@ -1,12 +1,13 @@
 // namespaces
 var dwv = dwv || {};
 dwv.tool = dwv.tool || {};
-//external
-var Kinetic = Kinetic || {};
+// external
+var Konva = Konva || {};
 
 /**
  * Protractor factory.
  * @constructor
+ * @external Konva
  */
 dwv.tool.ProtractorFactory = function ()
 {
@@ -32,7 +33,7 @@ dwv.tool.ProtractorFactory.prototype.create = function (points, style/*, image*/
 {
     // physical shape
     var line0 = new dwv.math.Line(points[0], points[1]);
-    // points stored the kineticjs way
+    // points stored the Konvajs way
     var pointsArray = [];
     for( var i = 0; i < points.length; ++i )
     {
@@ -40,13 +41,13 @@ dwv.tool.ProtractorFactory.prototype.create = function (points, style/*, image*/
         pointsArray.push( points[i].getY() );
     }
     // draw shape
-    var kshape = new Kinetic.Line({
+    var kshape = new Konva.Line({
         points: pointsArray,
         stroke: style.getLineColour(),
         strokeWidth: style.getScaledStrokeWidth(),
         name: "shape"
     });
-    var group = new Kinetic.Group();
+    var group = new Konva.Group();
     group.name("protractor-group");
     group.add(kshape);
     group.visible(true); // dont inherit
@@ -63,7 +64,7 @@ dwv.tool.ProtractorFactory.prototype.create = function (points, style/*, image*/
 
         // quantification
         var quant = { "angle": { "value": angle, "unit": dwv.i18n("unit.degree")} };
-        var ktext = new Kinetic.Text({
+        var ktext = new Konva.Text({
             fontSize: style.getScaledFontSize(),
             fontFamily: style.getFontFamily(),
             fill: style.getLineColour(),
@@ -77,23 +78,23 @@ dwv.tool.ProtractorFactory.prototype.create = function (points, style/*, image*/
         // label
         var midX = ( line0.getMidpoint().getX() + line1.getMidpoint().getX() ) / 2;
         var midY = ( line0.getMidpoint().getY() + line1.getMidpoint().getY() ) / 2;
-        var klabel = new Kinetic.Label({
+        var klabel = new Konva.Label({
             x: midX,
             y: midY - 15,
             name: "label"
         });
         klabel.add(ktext);
-        klabel.add(new Kinetic.Tag());
+        klabel.add(new Konva.Tag());
 
         // arc
         var radius = Math.min(line0.getLength(), line1.getLength()) * 33 / 100;
-        var karc = new Kinetic.Arc({
+        var karc = new Konva.Arc({
             innerRadius: radius,
             outerRadius: radius,
             stroke: style.getLineColour(),
             strokeWidth: style.getScaledStrokeWidth(),
             angle: angle,
-            rotationDeg: -inclination,
+            rotation: -inclination,
             x: points[1].getX(),
             y: points[1].getY(),
             name: "shape-arc"

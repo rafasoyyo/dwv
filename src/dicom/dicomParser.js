@@ -5,15 +5,15 @@ dwv.dicom = dwv.dicom || {};
 
 /**
  * Clean string: trim and remove ending.
- * @param {String} string The string to clean.
+ * @param {String} inputStr The string to clean.
  * @return {String} The cleaned string.
  */
-dwv.dicom.cleanString = function (string)
+dwv.dicom.cleanString = function (inputStr)
 {
-    var res = string;
-    if ( string ) {
+    var res = inputStr;
+    if ( inputStr ) {
         // trim spaces
-        res = string.trim();
+        res = inputStr.trim();
         // get rid of ending zero-width space (u200B)
         if ( res[res.length-1] === String.fromCharCode("u200B") ) {
             res = res.substring(0, res.length-1);
@@ -113,15 +113,29 @@ dwv.dicom.DataReader = function (buffer, isLittleEndian)
         isLittleEndian = true;
     }
 
-    // Default text encoding
-    var utfLabel = "iso-8859-1";
+    // Default text decoder
+    var defaultTextDecoder = {};
+    defaultTextDecoder.decode = function (buffer) {
+        var result = "";
+        for ( var i = 0, leni = buffer.length; i < leni; ++i ) {
+            result += String.fromCharCode( buffer[ i ] );
+        }
+        return result;
+    };
+    // Text decoder
+    var textDecoder = defaultTextDecoder;
+    if (typeof window.TextDecoder !== "undefined") {
+        textDecoder = new TextDecoder("iso-8859-1");
+    }
 
     /**
      * Set the utfLabel used to construct the TextDecoder.
      * @param {String} label The encoding label.
      */
     this.setUtfLabel = function (label) {
-        utfLabel = label;
+        if (typeof window.TextDecoder !== "undefined") {
+            textDecoder = new TextDecoder(label);
+        }
     };
 
     /**
@@ -375,23 +389,6 @@ dwv.dicom.DataReader = function (buffer, isLittleEndian)
     };
 
     /**
-     * Decode an input string.
-     */
-    function decodeString(buffer) {
-        var result = "";
-        if (typeof window.TextDecoder !== "undefined") {
-            var td = new TextDecoder(utfLabel);
-            result = td.decode(buffer);
-        }
-        else {
-            for ( var i = 0; i < buffer.length; ++i ) {
-                result += String.fromCharCode( buffer[ i ] );
-            }
-        }
-        return result;
-    }
-
-    /**
      * Read data as a string.
      * @param {Number} byteOffset The offset to start reading from.
      * @param {Number} nChars The number of characters to read.
@@ -399,8 +396,20 @@ dwv.dicom.DataReader = function (buffer, isLittleEndian)
      */
     this.readString = function (byteOffset, nChars) {
         var data = this.readUint8Array(byteOffset, nChars);
-        return decodeString(data);
+        return defaultTextDecoder.decode(data);
     };
+
+    /**
+     * Read data as a 'special' string, decoding it if the TextDecoder is available.
+     * @param {Number} byteOffset The offset to start reading from.
+     * @param {Number} nChars The number of characters to read.
+     * @return {String} The read data.
+     */
+    this.readSpecialString = function (byteOffset, nChars) {
+        var data = this.readUint8Array(byteOffset, nChars);
+        return textDecoder.decode(data);
+    };
+
 };
 
 /**
@@ -425,6 +434,58 @@ dwv.dicom.splitGroupElementKey = function (key)
 };
 
 /**
+ * Get patient orientation label in the reverse direction.
+ * @param {String} ori Patient Orientation value.
+ * @return {String} Reverse Orientation Label.
+ */
+dwv.dicom.getReverseOrientation = function (ori)
+{
+    if (!ori) {
+        return null;
+    }
+    // reverse labels
+    var rlabels = {
+        "L": "R",
+        "R": "L",
+        "A": "P",
+        "P": "A",
+        "H": "F",
+        "F": "H"
+    };
+
+    var rori = "";
+    for (var n=0; n<ori.length; n++) {
+        var o = ori.substr(n,1);
+        var r = rlabels[o];
+        if (r){
+            rori += r;
+        }
+    }
+    // return
+    return rori;
+};
+
+/**
+ * Tell if a given syntax is an implicit one (element with no VR).
+ * @param {String} syntax The transfer syntax to test.
+ * @return {Boolean} True if an implicit syntax.
+ */
+dwv.dicom.isImplicitTransferSyntax = function (syntax)
+{
+    return syntax === "1.2.840.10008.1.2";
+};
+
+/**
+ * Tell if a given syntax is a big endian syntax.
+ * @param {String} syntax The transfer syntax to test.
+ * @return {Boolean} True if a big endian syntax.
+ */
+dwv.dicom.isBigEndianTransferSyntax = function (syntax)
+{
+    return syntax === "1.2.840.10008.1.2.2";
+};
+
+/**
  * Tell if a given syntax is a JPEG baseline one.
  * @param {String} syntax The transfer syntax to test.
  * @return {Boolean} True if a jpeg baseline syntax.
@@ -436,11 +497,11 @@ dwv.dicom.isJpegBaselineTransferSyntax = function (syntax)
 };
 
 /**
- * Tell if a given syntax is a non supported JPEG one.
+ * Tell if a given syntax is a retired JPEG one.
  * @param {String} syntax The transfer syntax to test.
- * @return {Boolean} True if a non supported jpeg syntax.
+ * @return {Boolean} True if a retired jpeg syntax.
  */
-dwv.dicom.isJpegNonSupportedTransferSyntax = function (syntax)
+dwv.dicom.isJpegRetiredTransferSyntax = function (syntax)
 {
     return ( syntax.match(/1.2.840.10008.1.2.4.5/) !== null &&
         !dwv.dicom.isJpegBaselineTransferSyntax() &&
@@ -500,6 +561,28 @@ dwv.dicom.getSyntaxDecompressionName = function (syntax)
 };
 
 /**
+ * Tell if a given syntax is supported for reading.
+ * @param {String} syntax The transfer syntax to test.
+ * @return {Boolean} True if a supported syntax.
+ */
+dwv.dicom.isReadSupportedTransferSyntax = function (syntax) {
+
+    // Unsupported:
+    // "1.2.840.10008.1.2.1.99": Deflated Explicit VR - Little Endian
+    // "1.2.840.10008.1.2.4.100": MPEG2 Image Compression
+    // dwv.dicom.isJpegRetiredTransferSyntax(syntax): non supported JPEG
+    // dwv.dicom.isJpeglsTransferSyntax(syntax): JPEG-LS
+    // "1.2.840.10008.1.2.5": RLE (lossless)
+
+    return( syntax === "1.2.840.10008.1.2" || // Implicit VR - Little Endian
+        syntax === "1.2.840.10008.1.2.1" || // Explicit VR - Little Endian
+        syntax === "1.2.840.10008.1.2.2" || // Explicit VR - Big Endian
+        dwv.dicom.isJpegBaselineTransferSyntax(syntax) || // JPEG baseline
+        dwv.dicom.isJpegLosslessTransferSyntax(syntax) || // JPEG Lossless
+        dwv.dicom.isJpeg2000TransferSyntax(syntax) ); // JPEG 2000
+};
+
+/**
  * Get the transfer syntax name.
  * Reference: [UID Values]{@link http://dicom.nema.org/dicom/2013/output/chtml/part06/chapter_A.html}.
  * @param {String} syntax The transfer syntax.
@@ -507,7 +590,7 @@ dwv.dicom.getSyntaxDecompressionName = function (syntax)
  */
 dwv.dicom.getTransferSyntaxName = function (syntax)
 {
-    var name = "unknown";
+    var name = "Unknown";
     // Implicit VR - Little Endian
     if( syntax === "1.2.840.10008.1.2" ) {
         name = "Little Endian Implicit";
@@ -542,9 +625,9 @@ dwv.dicom.getTransferSyntaxName = function (syntax)
             name = "JPEG Lossless, Non-hierarchical, 1st Order Prediction";
         }
     }
-    // Non supported JPEG
-    else if( dwv.dicom.isJpegNonSupportedTransferSyntax(syntax) ) {
-        name = "Non supported JPEG";
+    // Retired JPEG
+    else if( dwv.dicom.isJpegRetiredTransferSyntax(syntax) ) {
+        name = "Retired JPEG";
     }
     // JPEG-LS
     else if( dwv.dicom.isJpeglsTransferSyntax(syntax) ) {
@@ -617,8 +700,8 @@ dwv.dicom.getTypedArray = function (bitsAllocated, pixelRepresentation, size)
 dwv.dicom.is32bitVLVR = function (vr)
 {
     // added locally used 'ox'
-    return ( vr === "OB" || vr === "OW" || vr === "OF" || vr === "ox" ||
-            vr === "SQ" || vr === "UN" );
+    return ( vr === "OB" || vr === "OW" || vr === "OF" || vr === "ox" ||  vr === "UT" ||
+    vr === "SQ" || vr === "UN" );
 };
 
 /**
@@ -806,6 +889,7 @@ dwv.dicom.DicomParser.prototype.readPixelItemDataElement = function (reader, off
 
     // first item: basic offset table
     var item = this.readDataElement(reader, offset, implicit);
+    var offsetTableVl = item.vl;
     offset = item.endOffset;
 
     // read until the sequence delimitation item
@@ -821,7 +905,8 @@ dwv.dicom.DicomParser.prototype.readPixelItemDataElement = function (reader, off
 
     return {
         'data': itemData,
-        'endOffset': offset };
+        'endOffset': offset,
+        'offsetTableVl': offsetTableVl };
 };
 
 /**
@@ -885,6 +970,8 @@ dwv.dicom.DicomParser.prototype.readDataElement = function (reader, offset, impl
         vl = 0;
     }
 
+    var startOffset = offset;
+
     // data
     var data = null;
     var isPixelData = (tag.name === "x7FE00010");
@@ -893,6 +980,7 @@ dwv.dicom.DicomParser.prototype.readDataElement = function (reader, offset, impl
     {
         var pixItemData = this.readPixelItemDataElement(reader, offset, implicit);
         offset = pixItemData.endOffset;
+        startOffset += pixItemData.offsetTableVl;
         data = pixItemData.data;
     }
     else if (isPixelData && (vr === "OB" || vr === "OW" || vr === "OF" || vr === "ox")) {
@@ -1007,7 +1095,7 @@ dwv.dicom.DicomParser.prototype.readDataElement = function (reader, offset, impl
         var raw = reader.readUint16Array( offset, vl );
         offset += vl;
         data = [];
-        for ( var i = 0; i < raw.length; i+=2 ) {
+        for ( var i = 0, leni = raw.length; i < leni; i+=2 ) {
             var stri = raw[i].toString(16);
             var stri1 = raw[i+1].toString(16);
             var str = "(";
@@ -1059,7 +1147,12 @@ dwv.dicom.DicomParser.prototype.readDataElement = function (reader, offset, impl
     // raw
     else
     {
-        data = reader.readString( offset, vl);
+        if ( vr === "SH" || vr === "LO" || vr === "ST" ||
+            vr === "PN" || vr === "LT" || vr === "UT" ) {
+            data = reader.readSpecialString( offset, vl );
+        } else {
+            data = reader.readString( offset, vl );
+        }
         offset += vl;
         data = data.split("\\");
     }
@@ -1070,6 +1163,7 @@ dwv.dicom.DicomParser.prototype.readDataElement = function (reader, offset, impl
         'vr': vr,
         'vl': vlString,
         'value': data,
+        'startOffset': startOffset,
         'endOffset': offset
     };
 };
@@ -1122,52 +1216,20 @@ dwv.dicom.DicomParser.prototype.parse = function (buffer)
     }
     var syntax = dwv.dicom.cleanString(this.dicomElements.x00020010.value[0]);
 
-    // Explicit VR - Little Endian
-    if( syntax === "1.2.840.10008.1.2.1" ) {
-        // nothing to do!
+    // check support
+    if (!dwv.dicom.isReadSupportedTransferSyntax(syntax)) {
+        throw new Error("Unsupported DICOM transfer syntax: '"+syntax+
+            "' ("+dwv.dicom.getTransferSyntaxName(syntax)+")");
     }
-    // Implicit VR - Little Endian
-    else if( syntax === "1.2.840.10008.1.2" ) {
+
+    // Implicit VR
+    if (dwv.dicom.isImplicitTransferSyntax(syntax)) {
         implicit = true;
     }
-    // Deflated Explicit VR - Little Endian
-    else if( syntax === "1.2.840.10008.1.2.1.99" ) {
-        throw new Error("Unsupported DICOM transfer syntax (Deflated Explicit VR): "+syntax);
-    }
-    // Explicit VR - Big Endian
-    else if( syntax === "1.2.840.10008.1.2.2" ) {
+
+    // Big Endian
+    if (dwv.dicom.isBigEndianTransferSyntax(syntax)) {
         dataReader = new dwv.dicom.DataReader(buffer,false);
-    }
-    // JPEG baseline
-    else if( dwv.dicom.isJpegBaselineTransferSyntax(syntax) ) {
-        // nothing to do!
-    }
-    // JPEG Lossless
-    else if( dwv.dicom.isJpegLosslessTransferSyntax(syntax) ) {
-        // nothing to do!
-    }
-    // non supported JPEG
-    else if( dwv.dicom.isJpegNonSupportedTransferSyntax(syntax) ) {
-        throw new Error("Unsupported DICOM transfer syntax (retired JPEG): "+syntax);
-    }
-    // JPEG-LS
-    else if( dwv.dicom.isJpeglsTransferSyntax(syntax) ) {
-        throw new Error("Unsupported DICOM transfer syntax (JPEG-LS): "+syntax);
-    }
-    // JPEG 2000
-    else if( dwv.dicom.isJpeg2000TransferSyntax(syntax) ) {
-        // nothing to do!
-    }
-    // MPEG2 Image Compression
-    else if( syntax === "1.2.840.10008.1.2.4.100" ) {
-        throw new Error("Unsupported DICOM transfer syntax (MPEG2): "+syntax);
-    }
-    // RLE (lossless)
-    else if( syntax === "1.2.840.10008.1.2.5" ) {
-        throw new Error("Unsupported DICOM transfer syntax (RLE): "+syntax);
-    }
-    else {
-        throw new Error("Unknown transfer syntax: "+syntax);
     }
 
     // default character set
@@ -1287,6 +1349,15 @@ dwv.dicom.DicomElementsWrapper = function (dicomElements) {
     /**
     * Get a DICOM Element value from a group/element key.
     * @param {String} groupElementKey The key to retrieve.
+    * @return {Object} The DICOM element.
+    */
+    this.getDEFromKey = function ( groupElementKey ) {
+        return dicomElements[groupElementKey];
+    };
+
+    /**
+    * Get a DICOM Element value from a group/element key.
+    * @param {String} groupElementKey The key to retrieve.
     * @param {Boolean} asArray Get the value as an Array.
     * @return {Object} The DICOM element value.
     */
@@ -1320,7 +1391,7 @@ dwv.dicom.DicomElementsWrapper = function (dicomElements) {
         var dicomElement = null;
         var dictElement = null;
         var row = null;
-        for ( var i = 0 ; i < keys.length; ++i ) {
+        for ( var i = 0, leni = keys.length; i < leni; ++i ) {
             dicomElement = dicomElements[keys[i]];
             row = {};
             // dictionnary entry (to get name)
@@ -1337,12 +1408,7 @@ dwv.dicom.DicomElementsWrapper = function (dicomElements) {
                 row.name = "Unknown Tag & Data";
             }
             // value
-            if ( dicomElement.tag.name !== "x7FE00010" ) {
-                row.value = dicomElement.value;
-            }
-            else {
-                row.value = "...";
-            }
+            row.value = this.getElementValueAsString(dicomElement);
             // others
             row.group = dicomElement.tag.group;
             row.element = dicomElement.tag.element;
@@ -1373,7 +1439,7 @@ dwv.dicom.DicomElementsWrapper = function (dicomElements) {
         }
         var dicomElement = null;
         var checkHeader = true;
-        for ( var i = 0 ; i < keys.length; ++i ) {
+        for ( var i = 0, leni = keys.length; i < leni; ++i ) {
             dicomElement = dicomElements[keys[i]];
             if ( checkHeader && dicomElement.tag.group !== "0x0002" ) {
                 result += "\n";
@@ -1389,6 +1455,112 @@ dwv.dicom.DicomElementsWrapper = function (dicomElements) {
         return result;
     };
 
+};
+
+/**
+ * Get a data element value as a string.
+ * @param {Object} dicomElement The DICOM element.
+ * @param {Boolean} pretty When set to true, returns a 'pretified' content.
+ * @return {String} A string representation of the DICOM element.
+ */
+dwv.dicom.DicomElementsWrapper.prototype.getElementValueAsString = function ( dicomElement, pretty )
+{
+    var str = "";
+    var strLenLimit = 65;
+
+    // dafault to pretty output
+    if ( typeof pretty === "undefined" ) {
+        pretty = true;
+    }
+    // check dicom element input
+    if ( typeof dicomElement === "undefined" || dicomElement === null ) {
+        return str;
+    }
+
+    // Polyfill for Number.isInteger.
+    var isInteger = Number.isInteger || function (value) {
+      return typeof value === 'number' &&
+        isFinite(value) &&
+        Math.floor(value) === value;
+    };
+
+    // TODO Support sequences.
+
+    if ( dicomElement.vr !== "SQ" &&
+        dicomElement.value.length === 1 && dicomElement.value[0] === "" ) {
+        str += "(no value available)";
+    } else if ( dicomElement.tag.group === '0x7FE0' &&
+        dicomElement.tag.element === '0x0010' &&
+        dicomElement.vl === 'u/l' ) {
+        str = "(PixelSequence)";
+    } else if ( dicomElement.vr === "DA" && pretty ) {
+        var daValue = dicomElement.value[0];
+        var daYear = parseInt( daValue.substr(0,4), 10 );
+        var daMonth = parseInt( daValue.substr(4,2), 10 ) - 1; // 0-11
+        var daDay = parseInt( daValue.substr(6,2), 10 );
+        var da = new Date(daYear, daMonth, daDay);
+        str = da.toLocaleDateString();
+    } else if ( dicomElement.vr === "TM"  && pretty ) {
+        var tmValue = dicomElement.value[0];
+        var tmHour = tmValue.substr(0,2);
+        var tmMinute = tmValue.length >= 4 ? tmValue.substr(2,2) : "00";
+        var tmSeconds = tmValue.length >= 6 ? tmValue.substr(4,2) : "00";
+        str = tmHour + ':' + tmMinute + ':' + tmSeconds;
+    } else {
+        var isOtherVR = ( dicomElement.vr[0].toUpperCase() === "O" );
+        var isFloatNumberVR = ( dicomElement.vr === "FL" ||
+            dicomElement.vr === "FD" ||
+            dicomElement.vr === "DS");
+        var valueStr = "";
+        for ( var k = 0, lenk = dicomElement.value.length; k < lenk; ++k ) {
+            valueStr = "";
+            if ( k !== 0 ) {
+                valueStr += "\\";
+            }
+            if ( isFloatNumberVR ) {
+                var val = dicomElement.value[k];
+                if (typeof val === "string") {
+                    val = dwv.dicom.cleanString(val);
+                }
+                var num = Number( val );
+                if ( !isInteger( num ) && pretty ) {
+                    valueStr += num.toPrecision(4);
+                } else {
+                    valueStr += num.toString();
+                }
+            } else if ( isOtherVR ) {
+                var tmp = dicomElement.value[k].toString(16);
+                if ( dicomElement.vr === "OB" ) {
+                    tmp = "00".substr(0, 2 - tmp.length) + tmp;
+                }
+                else {
+                    tmp = "0000".substr(0, 4 - tmp.length) + tmp;
+                }
+                valueStr += tmp;
+            } else if ( typeof dicomElement.value[k] === "string" ) {
+                valueStr += dwv.dicom.cleanString(dicomElement.value[k]);
+            } else {
+                valueStr += dicomElement.value[k];
+            }
+            // check length
+            if ( str.length + valueStr.length <= strLenLimit ) {
+                str += valueStr;
+            } else {
+                str += "...";
+                break;
+            }
+        }
+    }
+    return str;
+};
+
+/**
+ * Get a data element value as a string.
+ * @param {String} groupElementKey The key to retrieve.
+ */
+dwv.dicom.DicomElementsWrapper.prototype.getElementValueAsStringFromKey = function ( groupElementKey )
+{
+    return this.getElementValueAsString( this.getDEFromKey(groupElementKey) );
 };
 
 /**
@@ -1451,50 +1623,6 @@ dwv.dicom.DicomElementsWrapper.prototype.getElementAsString = function ( dicomEl
         else if ( isPixSequence ) {
             line += " (PixelSequence #=" + deSize + ")";
         }
-        // 'O'ther array, limited display length
-        else if ( isOtherVR ||
-                dicomElement.vr === 'pi' ||
-                dicomElement.vr === "UL" ||
-                dicomElement.vr === "US" ||
-                dicomElement.vr === "SL" ||
-                dicomElement.vr === "SS" ||
-                dicomElement.vr === "FL" ||
-                dicomElement.vr === "FD" ||
-                dicomElement.vr === "AT" ) {
-            line += " ";
-            var valuesStr = "";
-            var valueStr = "";
-            for ( var k = 0; k < dicomElement.value.length; ++k ) {
-                valueStr = "";
-                if ( k !== 0 ) {
-                    valueStr += "\\";
-                }
-                if ( dicomElement.vr === "FL" ) {
-                    valueStr += Number(dicomElement.value[k].toPrecision(8));
-                }
-                else if ( isOtherVR ) {
-                    var tmp = dicomElement.value[k].toString(16);
-                    if ( dicomElement.vr === "OB" ) {
-                        tmp = "00".substr(0, 2 - tmp.length) + tmp;
-                    }
-                    else {
-                        tmp = "0000".substr(0, 4 - tmp.length) + tmp;
-                    }
-                    valueStr += tmp;
-                }
-                else {
-                    valueStr += dicomElement.value[k];
-                }
-                if ( valuesStr.length + valueStr.length <= 65 ) {
-                    valuesStr += valueStr;
-                }
-                else {
-                    valuesStr += "...";
-                    break;
-                }
-            }
-            line += valuesStr;
-        }
         else if ( dicomElement.vr === 'SQ' ) {
             line += " (Sequence with";
             if ( dicomElement.vl === "u/l" ) {
@@ -1507,20 +1635,23 @@ dwv.dicom.DicomElementsWrapper.prototype.getElementAsString = function ( dicomEl
             line += dicomElement.value.length;
             line += ")";
         }
+        // 'O'ther array, limited display length
+        else if ( isOtherVR ||
+                dicomElement.vr === 'pi' ||
+                dicomElement.vr === "UL" ||
+                dicomElement.vr === "US" ||
+                dicomElement.vr === "SL" ||
+                dicomElement.vr === "SS" ||
+                dicomElement.vr === "FL" ||
+                dicomElement.vr === "FD" ||
+                dicomElement.vr === "AT" ) {
+            line += " ";
+            line += this.getElementValueAsString(dicomElement, false);
+        }
         // default
         else {
             line += " [";
-            for ( var j = 0; j < dicomElement.value.length; ++j ) {
-                if ( j !== 0 ) {
-                    line += "\\";
-                }
-                if ( typeof dicomElement.value[j] === "string" ) {
-                    line += dwv.dicom.cleanString(dicomElement.value[j]);
-                }
-                else {
-                    line += dicomElement.value[j];
-                }
-            }
+            line += this.getElementValueAsString(dicomElement, false);
             line += "]";
         }
     }
@@ -1555,7 +1686,7 @@ dwv.dicom.DicomElementsWrapper.prototype.getElementAsString = function ( dicomEl
     // continue for sequence
     if ( dicomElement.vr === 'SQ' ) {
         var item = null;
-        for ( var l = 0; l < dicomElement.value.length; ++l ) {
+        for ( var l = 0, lenl = dicomElement.value.length; l < lenl; ++l ) {
             item = dicomElement.value[l];
             var itemKeys = Object.keys(item);
             if ( itemKeys.length === 0 ) {
@@ -1578,7 +1709,7 @@ dwv.dicom.DicomElementsWrapper.prototype.getElementAsString = function ( dicomEl
             line += "\n";
             line += this.getElementAsString(itemElement, prefix + "  ");
 
-            for ( var m = 0; m < itemKeys.length; ++m ) {
+            for ( var m = 0, lenm = itemKeys.length; m < lenm; ++m ) {
                 if ( itemKeys[m] !== "xFFFEE000" ) {
                     line += "\n";
                     line += this.getElementAsString(item[itemKeys[m]], prefix + "    ");
@@ -1618,7 +1749,7 @@ dwv.dicom.DicomElementsWrapper.prototype.getElementAsString = function ( dicomEl
     // pixel sequence
     else if ( isPixSequence ) {
         var pixItem = null;
-        for ( var n = 0; n < dicomElement.value.length; ++n ) {
+        for ( var n = 0, lenn = dicomElement.value.length; n < lenn; ++n ) {
             pixItem = dicomElement.value[n];
             line += "\n";
             pixItem.vr = 'pi';
@@ -1665,14 +1796,16 @@ dwv.dicom.DicomElementsWrapper.prototype.getFromName = function ( name )
    var keys0 = Object.keys(dict);
    var keys1 = null;
    var k0 = 0;
+   var lenk0 = 0;
    var k1 = 0;
+   var lenk1 = 0;
    // label for nested loop break
    outLabel:
    // search through dictionary
-   for ( k0 = 0; k0 < keys0.length; ++k0 ) {
+   for ( k0 = 0, lenk0 = keys0.length; k0 < lenk0; ++k0 ) {
        group = keys0[k0];
        keys1 = Object.keys( dict[group] );
-       for ( k1 = 0; k1 < keys1.length; ++k1 ) {
+       for ( k1 = 0, lenk1 = keys1.length; k1 < lenk1; ++k1 ) {
            element = keys1[k1];
            if ( dict[group][element][2] === name ) {
                break outLabel;

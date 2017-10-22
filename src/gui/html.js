@@ -308,7 +308,10 @@ dwv.html.createHighlightNode = function (child) {
  * @param {Object} node The node to remove kids.
  */
 dwv.html.cleanNode = function (node) {
-    // remove its children
+    // remove its children if node exists
+    if ( !node ) {
+        return;
+    }
     while (node.hasChildNodes()) {
         node.removeChild(node.firstChild);
     }
@@ -331,7 +334,8 @@ dwv.html.removeNode = function (node) {
 };
 
 /**
- *
+ * Remove a list of HTML nodes and all their children.
+ * @param {Array} nodes The list of nodes to delete.
  */
 dwv.html.removeNodes = function (nodes) {
     for ( var i = 0; i < nodes.length; ++i ) {

@@ -31,9 +31,9 @@ function startApp() {
 
 // Image decoders (for web workers)
 dwv.image.decoderScripts = {
-    "jpeg2000": "../../ext/pdfjs/decode-jpeg2000.js",
-    "jpeg-lossless": "../../ext/rii-mango/decode-jpegloss.js",
-    "jpeg-baseline": "../../ext/pdfjs/decode-jpegbaseline.js"
+    "jpeg2000": "../../decoders/pdfjs/decode-jpeg2000.js",
+    "jpeg-lossless": "../../decoders/rii-mango/decode-jpegloss.js",
+    "jpeg-baseline": "../../decoders/pdfjs/decode-jpegbaseline.js"
 };
 
 // check browser support
@@ -57,6 +57,16 @@ $(document).ready( function() {
 });
 // i18n ready?
 dwv.i18nOnLoaded( function () {
-    i18nLoaded = true;
-    launchApp();
+    // call next once the overlays are loaded
+    var onLoaded = function (data) {
+        dwv.gui.info.overlayMaps = data;
+        i18nLoaded = true;
+        launchApp();
+    };
+    // load overlay map info
+    $.getJSON( dwv.i18nGetLocalePath("overlays.json"), onLoaded )
+    .fail( function () {
+        console.log("Using fallback overlays.");
+        $.getJSON( dwv.i18nGetFallbackLocalePath("overlays.json"), onLoaded );
+    });
 });
